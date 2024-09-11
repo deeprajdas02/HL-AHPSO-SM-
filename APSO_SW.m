@@ -1,0 +1,151 @@
+function [gbest, gbest_val, FEs, X, pbest, phase ] = APSO_SW(dim, N, Tmax, MaxFEs , FEs , X , V, xmin, xmax , vmin, vmax ,wmin, wmax, t_divisions, c, phase,gbest,gbest_val, fhd, func_no, C)
+    % Parameters initialization
+    t = 0;
+    N1 = N/2;
+    w = wmax;
+    c1 = 2.0;       % Cognitive coefficient
+    c2 = 2.0;       % Social coefficient
+     % Max position
+    pbest = [X,inf(N, 1)];
+    pbest_val = inf(N, 1);
+    
+    gbest_prev = inf;
+    flag = 0;
+    
+    disp("HCLPSO");
+        
+    % Initialize variables for ADM
+    %subdivision_counts = zeros(dim, t_divisions);
+    %subdivision_intervals = linspace(xmin, xmax, t_divisions + 1);
+
+
+    % Update particle velocities using PSO
+    for i = 1:N
+        V(i, :) = w * V(i, :) + c1 * rand() * (pbest(i, 1:end-1) - X(i, :)) + c2 * rand() * (gbest - X(i, :));
+        % Velocity clamping
+        V(i, :) = max(min(V(i, :), vmax), vmin);
+    end
+    
+    % Update particle positions
+    X = X + V;
+    % Position clamping
+    X = max(min(X, xmax), xmin);
+    
+    % Evaluate fitness
+    for i = 1:N
+        current_val = feval(fhd,X(i, :)',func_no,C);
+        disp(X(i, :));
+        % Fitness function
+        % Update pbest
+        if current_val < pbest(i,end)
+            pbest(i,end) = current_val;
+            pbest(i, 1:end-1) = X(i, :);
+        end
+        % Update gbest
+        if current_val < gbest_val
+            gbest_val = current_val;
+            gbest = X(i, :);
+        end
+    end
+
+    % Main AHPSO loop
+    while FEs <= MaxFEs
+       
+        % Calculate average fitness of the particles
+        avg_fitness = mean(pbest_val);
+        
+        % Update inertia weight using adaptive strategy
+        w = wmin + ((wmax - wmin) * ((Tmax - t) / Tmax));
+
+        for i = 1:N1    % AIW strategy
+            w_t = w + c * (pbest(i, end) >= avg_fitness);
+            w_t = max(min(w_t, wmax), wmin);
+            
+            r1 = rand();
+            r2 = rand();
+            % Update particle velocity with adaptive inertia weight
+            V(i, :) = w_t * V(i, :) + c1 * r1 * (pbest(i, 1:end-1) - X(i, :)) + c2 * r2 * (gbest - X(i, :));
+             % Update particle position
+            X(i, :) = X(i, :) + V(i, :);
+        end
+
+        for i = (N1+1):N
+            r = rand();
+            % Update particle velocity
+            V(i, :) = w * V(i, :) + c1 * r * (pbest(i, 1:end-1) - X(i, :));
+
+            % Update particle position
+            X(i, :) = X(i, :) + V(i, :);
+        
+
+            % Use DOL logic according to eq (13), (14), & (15)
+            
+            gbest_opposite = xmin + (xmax - xmin) - gbest; % Assuming gbest is within [xmin, xmax]
+            gbest_rand_opposite = gbest_opposite .* rand(1, dim);
+            gbest_DOL = gbest + rand(1, dim) .* (gbest_rand_opposite - gbest);
+            
+            % Evaluate the fitness of the DOL position
+            gbest_DOL_val = feval(fhd,gbest_DOL',func_no,C);
+            
+            % Update the gbest if the DOL position is better
+            if gbest_DOL_val < gbest_val
+                gbest_val = gbest_DOL_val;
+                gbest = gbest_DOL;
+                %pbest(gbest_index,1:end-1)=gbest_DOL;
+                %pbest(gbest_index,end) = gbest_val;
+                %X(gbest_index,:)=gbest_DOL;
+            end
+            
+            % Perform ADM on gbest
+            % Calculate Padjust
+            Padjust = (exp(t) - 1) / (exp(Tmax) - 1);
+            for d = 1:dim
+                % Determine the subdivision interval for gbest in this dimension
+                subdivision_size = (xmax - xmin) / t_divisions;
+                gbest_subdivision_index = min(floor((gbest(d) - xmin) / subdivision_size) + 1, t_divisions);
+    
+                % Mutation based on evolution stage and performance
+                if rand >= Padjust
+                    % Early stage: target lower performance intervals
+                    mutation_target_index = randi([max(1, gbest_subdivision_index - 1), gbest_subdivision_index]);
+                else
+                    % Later stage: target higher performance intervals
+                    mutation_target_index = randi([gbest_subdivision_index, min(gbest_subdivision_index + 1, t_divisions)]);
+                end
+                
+                r = rand();
+                % Calculate the mutation position within the selected subdivision
+                mutation_position = xmin + subdivision_size * (mutation_target_index - 1) + r * subdivision_size;
+                gbest_mutated = gbest;
+                gbest_mutated = mutation_position;
+    
+                % Evaluate the mutated gbest
+                gbest_mutated_val = feval(fhd,gbest_mutated',func_no,C);
+                disp(feval(fhd,gbest_mutated',func_no,C));
+                if gbest_mutated_val < gbest_val
+                    gbest = gbest_mutated;
+                    gbest_val = gbest_mutated_val;
+                    pbest(gbest_index,1:end-1)=gbest_mutated;
+                    pbest(gbest_index,end) = gbest_val;
+                    X(gbest_index,:)=gbest_mutated;
+                end
+            end
+        end
+
+        % Increment Fes
+        FEs = FEs + (N);
+        t = t+1;
+        if gbest_prev == gbest_val
+            flag = flag + 1 ;
+        else 
+            gbest_prev = gbest_val;
+            flag  = 0;
+        end
+
+        if flag == 20 || t == Tmax
+            disp("returned");
+            phase = "LSHADE";
+            return;
+        end
+    end
+end
